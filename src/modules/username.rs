@@ -29,7 +29,8 @@ pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
         };
 
         module.set_style(module_style);
-        module.create_segment("username", &SegmentConfig::new(&user?));
+        let user_stacked = format!("{}{}{}", config.prefix, &user?, config.suffix);
+        module.create_segment("username", &SegmentConfig::new(&user_stacked));
 
         Some(module)
     } else {
