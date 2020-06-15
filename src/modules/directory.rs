@@ -91,6 +91,7 @@ pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
     );
 
     module.get_prefix().set_value(config.prefix);
+    module.get_suffix().set_value(config.suffix);
 
     Some(module)
 }
