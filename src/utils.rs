@@ -9,8 +9,6 @@ use std::time::{Duration, Instant};
 
 use crate::context::Shell;
 
-use crate::context::Shell;
-
 /// Return the string contents of a file
 pub fn read_file<P: AsRef<Path> + Debug>(file_name: P) -> Result<String> {
     log::trace!("Trying to read from {:?}", file_name);

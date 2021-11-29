@@ -49,21 +49,6 @@ fn shorten_link(_url: &str) -> Option<String> {
     None
 }
 
-#[cfg(feature = "http")]
-fn shorten_link(link: &str) -> Option<String> {
-    attohttpc::post(&format!("{}{}", GIT_IO_BASE_URL, "create"))
-        .form(&[("url", link)])
-        .ok()
-        .and_then(|r| r.send().ok())
-        .and_then(|r| r.text().ok())
-        .map(|slug| format!("{}{}", GIT_IO_BASE_URL, slug))
-}
-
-#[cfg(not(feature = "http"))]
-fn shorten_link(_url: &str) -> Option<String> {
-    None
-}
-
 const UNKNOWN_SHELL: &str = "<unknown shell>";
 const UNKNOWN_TERMINAL: &str = "<unknown terminal>";
 const UNKNOWN_VERSION: &str = "<unknown version>";

@@ -6,8 +6,6 @@ use starship_battery as battery;
 
 use crate::formatter::StringFormatter;
 
-use crate::formatter::StringFormatter;
-
 /// Creates a module for the battery percentage and charging state
 pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
     let battery_status = get_battery_status(context)?;

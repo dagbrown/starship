@@ -7,9 +7,6 @@ use std::path::PathBuf;
 use regex::Regex;
 const JAVA_VERSION_PATTERN: &str = "(?P<version>[\\d\\.]+)[^\\s]*\\s(?:built|from)";
 
-use regex::Regex;
-const JAVA_VERSION_PATTERN: &str = "(?P<version>[\\d\\.]+)[^\\s]*\\s(?:built|from)";
-
 /// Creates a module with the current Java version
 pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
     let mut module = context.new_module("java");

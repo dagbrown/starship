@@ -1,5 +1,5 @@
 use git2::RepositoryState;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::{Context, Module, RootModuleConfig};
 use crate::configs::git_state::GitStateConfig;

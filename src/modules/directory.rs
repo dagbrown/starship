@@ -101,9 +101,9 @@ pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
     } else {
         String::from("")
     };
-    log::debug!("Dir string: {}", dir_string);
+    // log::debug!("Dir string: {}", dir_string);
 
-    let substituted_dir = substitute_path(dir_string, &config.substitutions);
+    // let substituted_dir = substitute_path(dir_string, &config.substitutions);
 
     let path_vec = match &repo.and_then(|r| r.root.as_ref()) {
         Some(repo_root) if config.repo_root_style.is_some() => {

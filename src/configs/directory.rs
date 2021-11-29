@@ -28,7 +28,6 @@ impl<'a> Default for DirectoryConfig<'a> {
             truncation_length: 3,
             truncate_to_repo: true,
             fish_style_pwd_dir_length: 0,
-            substitutions: HashMap::new(),
             use_logical_path: true,
             substitutions: IndexMap::new(),
             format: "[$path]($style)[$read_only]($read_only_style) ",
