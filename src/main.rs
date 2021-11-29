@@ -1,29 +1,20 @@
+#![warn(clippy::disallowed_method)]
+
+use clap::crate_authors;
 use std::io;
 use std::time::SystemTime;
 
-#[macro_use]
-extern crate clap;
-#[macro_use]
-extern crate pest_derive;
-
-mod bug_report;
-mod config;
-mod configs;
-mod configure;
-mod context;
-mod formatter;
-mod init;
-mod module;
-mod modules;
-mod print;
-mod segment;
-mod utils;
-
-use crate::module::ALL_MODULES;
 use clap::{App, AppSettings, Arg, Shell, SubCommand};
+use rand::distributions::Alphanumeric;
+use rand::Rng;
+use starship::module::ALL_MODULES;
+use starship::*;
 
 fn main() {
-    pretty_env_logger::init_custom_env("STARSHIP_LOG");
+    // Configure the current terminal on windows to support ANSI escape sequences.
+    #[cfg(windows)]
+    let _ = ansi_term::enable_ansi_support();
+    logger::init();
 
     let status_code_arg = Arg::with_name("status_code")
         .short("s")
@@ -32,17 +23,41 @@ fn main() {
         .help("The status code of the previously run command")
         .takes_value(true);
 
+    let pipestatus_arg = Arg::with_name("pipestatus")
+        .long("pipestatus")
+        .value_name("PIPESTATUS")
+        .help("Status codes from a command pipeline")
+        .long_help("Bash and Zsh supports returning codes for each process in a pipeline.")
+        .multiple(true);
+
+    let terminal_width_arg = Arg::with_name("terminal_width")
+        .short("w")
+        .long("terminal-width")
+        .value_name("TERMINAL_WIDTH")
+        .help("The width of the current interactive terminal.")
+        .takes_value(true);
+
     let path_arg = Arg::with_name("path")
         .short("p")
         .long("path")
         .value_name("PATH")
-        .help("The path that the prompt should render for")
+        .help("The path that the prompt should render for.")
+        .takes_value(true);
+
+    let logical_path_arg = Arg::with_name("logical_path")
+        .short("P")
+        .long("logical-path")
+        .value_name("LOGICAL_PATH")
+        .help(concat!(
+            "The logical path that the prompt should render for. ",
+            "This path should be a virtual/logical representation of the PATH argument."
+        ))
         .takes_value(true);
 
     let shell_arg = Arg::with_name("shell")
         .value_name("SHELL")
         .help(
-            "The name of the currently running shell\nCurrently supported options: bash, zsh, fish, powershell, ion",
+            "The name of the currently running shell\nCurrently supported options: bash, zsh, fish, powershell, ion, elvish, tcsh, nu, xonsh",
         )
         .required(true);
 
@@ -72,11 +87,13 @@ fn main() {
         .long("print-full-init")
         .help("Print the main initialization script (as opposed to the init stub)");
 
+    let long_version = crate::shadow::clap_version();
     let mut app =
         App::new("starship")
             .about("The cross-shell prompt for astronauts. ☄🌌️")
             // pull the version number from Cargo.toml
-            .version(crate_version!())
+            .version(shadow::PKG_VERSION)
+            .long_version(long_version.as_str())
             // pull the authors from Cargo.toml
             .author(crate_authors!())
             .after_help("https://github.com/starship/starship")
@@ -90,8 +107,16 @@ fn main() {
             .subcommand(
                 SubCommand::with_name("prompt")
                     .about("Prints the full starship prompt")
+                    .arg(
+                        Arg::with_name("right")
+                            .long("right")
+                            .help("Print the right prompt (instead of the standard left prompt)"),
+                    )
                     .arg(&status_code_arg)
+                    .arg(&pipestatus_arg)
+                    .arg(&terminal_width_arg)
                     .arg(&path_arg)
+                    .arg(&logical_path_arg)
                     .arg(&cmd_duration_arg)
                     .arg(&keymap_arg)
                     .arg(&jobs_arg),
@@ -112,7 +137,10 @@ fn main() {
                             .help("List out all supported modules"),
                     )
                     .arg(&status_code_arg)
+                    .arg(&pipestatus_arg)
+                    .arg(&terminal_width_arg)
                     .arg(&path_arg)
+                    .arg(&logical_path_arg)
                     .arg(&cmd_duration_arg)
                     .arg(&keymap_arg)
                     .arg(&jobs_arg),
@@ -129,6 +157,38 @@ fn main() {
                     )
                     .arg(Arg::with_name("value").help("Value to place into that key")),
             )
+            .subcommand(
+                SubCommand::with_name("print-config")
+                    .about("Prints the computed starship configuration")
+                    .arg(
+                        Arg::with_name("default")
+                            .short("d")
+                            .long("default")
+                            .help("Print the default instead of the computed config")
+                            .takes_value(false),
+                    )
+                    .arg(
+                        Arg::with_name("name")
+                            .help("Configuration keys to print")
+                            .multiple(true)
+                            .required(false),
+                    ),
+            )
+            .subcommand(
+                SubCommand::with_name("toggle")
+                    .about("Toggle a given starship module")
+                    .arg(
+                        Arg::with_name("name")
+                            .help("The name of the module to be toggled")
+                            .required(true),
+                    )
+                    .arg(
+                        Arg::with_name("key")
+                            .help("The key of the config to be toggled")
+                            .required(false)
+                            .required_unless("name"),
+                    ),
+            )
             .subcommand(SubCommand::with_name("bug-report").about(
                 "Create a pre-populated GitHub issue with information about your configuration",
             ))
@@ -138,7 +198,28 @@ fn main() {
                     .settings(&[AppSettings::Hidden]),
             )
             .subcommand(
-                SubCommand::with_name("explain").about("Explains the currently showing modules"),
+                SubCommand::with_name("explain")
+                    .about("Explains the currently showing modules")
+                    .arg(&status_code_arg)
+                    .arg(&pipestatus_arg)
+                    .arg(&terminal_width_arg)
+                    .arg(&path_arg)
+                    .arg(&logical_path_arg)
+                    .arg(&cmd_duration_arg)
+                    .arg(&keymap_arg)
+                    .arg(&jobs_arg),
+            )
+            .subcommand(
+                SubCommand::with_name("timings")
+                    .about("Prints timings of all active modules")
+                    .arg(&status_code_arg)
+                    .arg(&pipestatus_arg)
+                    .arg(&terminal_width_arg)
+                    .arg(&path_arg)
+                    .arg(&logical_path_arg)
+                    .arg(&cmd_duration_arg)
+                    .arg(&keymap_arg)
+                    .arg(&jobs_arg),
             )
             .subcommand(
                 SubCommand::with_name("completions")
@@ -152,7 +233,8 @@ fn main() {
                             .required(true)
                             .env("STARSHIP_SHELL"),
                     ),
-            );
+            )
+            .subcommand(SubCommand::with_name("session").about("Generate random session key"));
 
     let matches = app.clone().get_matches();
 
@@ -187,6 +269,23 @@ fn main() {
                 configure::edit_configuration()
             }
         }
+        ("print-config", Some(sub_m)) => {
+            let print_default = sub_m.is_present("default");
+            let paths = sub_m
+                .values_of("name")
+                .map(|paths| paths.collect::<Vec<&str>>())
+                .unwrap_or_default();
+            configure::print_configuration(print_default, &paths)
+        }
+        ("toggle", Some(sub_m)) => {
+            if let Some(name) = sub_m.value_of("name") {
+                if let Some(value) = sub_m.value_of("key") {
+                    configure::toggle_configuration(name, value)
+                } else {
+                    configure::toggle_configuration(name, "disabled")
+                }
+            }
+        }
         ("bug-report", Some(_)) => bug_report::create(),
         ("time", _) => {
             match SystemTime::now()
@@ -198,6 +297,7 @@ fn main() {
             }
         }
         ("explain", Some(sub_m)) => print::explain(sub_m.clone()),
+        ("timings", Some(sub_m)) => print::timings(sub_m.clone()),
         ("completions", Some(sub_m)) => {
             let shell: Shell = sub_m
                 .value_of("shell")
@@ -207,6 +307,14 @@ fn main() {
 
             app.gen_completions_to("starship", shell, &mut io::stdout().lock());
         }
+        ("session", _) => println!(
+            "{}",
+            rand::thread_rng()
+                .sample_iter(&Alphanumeric)
+                .take(16)
+                .map(char::from)
+                .collect::<String>()
+        ),
         (command, _) => unreachable!("Invalid subcommand: {}", command),
     }
 }

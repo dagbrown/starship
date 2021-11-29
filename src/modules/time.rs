@@ -8,6 +8,9 @@ use crate::formatter::StringFormatter;
 pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
     let mut module = context.new_module("time");
     let config: TimeConfig = TimeConfig::try_load(module.config);
+
+    // As we default to disabled=true, we have to check here after loading our config module,
+    // before it was only checking against whatever is in the config starship.toml
     if config.disabled {
         return None;
     };
@@ -28,17 +31,17 @@ pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
     );
 
     let formatted_time_string = if config.utc_time_offset != "local" {
-        match create_offset_time_string(Utc::now(), &config.utc_time_offset, &time_format) {
+        match create_offset_time_string(Utc::now(), config.utc_time_offset, time_format) {
             Ok(formatted_string) => formatted_string,
             Err(_) => {
                 log::warn!(
                     "Invalid utc_time_offset configuration provided! Falling back to \"local\"."
                 );
-                format_time(&time_format, Local::now())
+                format_time(time_format, Local::now())
             }
         }
     } else {
-        format_time(&time_format, Local::now())
+        format_time(time_format, Local::now())
     };
 
     let parsed = StringFormatter::new(config.format).and_then(|formatter| {
@@ -51,7 +54,7 @@ pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
                 "time" => Some(Ok(&formatted_time_string)),
                 _ => None,
             })
-            .parse(None)
+            .parse(None, Some(context))
     });
 
     module.set_segments(match parsed {
@@ -71,11 +74,10 @@ fn create_offset_time_string(
     time_format: &str,
 ) -> Result<String, &'static str> {
     // Using floats to allow 30/45 minute offsets: https://www.timeanddate.com/time/time-zones-interesting.html
-    let utc_time_offset_in_hours = match utc_time_offset_str.parse::<f32>() {
-        Ok(parsed_value) => parsed_value,
+    let utc_time_offset_in_hours = utc_time_offset_str.parse::<f32>().unwrap_or(
         // Passing out of range value to force falling back to "local"
-        Err(_) => 25_f32,
-    };
+        25_f32,
+    );
     if utc_time_offset_in_hours < 24_f32 && utc_time_offset_in_hours > -24_f32 {
         let utc_offset_in_seconds: i32 = (utc_time_offset_in_hours * 3600_f32) as i32;
         let timezone_offset = FixedOffset::east(utc_offset_in_seconds);
@@ -84,7 +86,7 @@ fn create_offset_time_string(
         let target_time = utc_time.with_timezone(&timezone_offset);
         log::trace!("Time in target timezone now is {}", target_time);
 
-        Ok(format_time_fixed_offset(&time_format, target_time))
+        Ok(format_time_fixed_offset(time_format, target_time))
     } else {
         Err("Invalid timezone offset.")
     }
@@ -151,6 +153,7 @@ tests become extra important */
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test::ModuleRenderer;
     use chrono::offset::TimeZone;
 
     const FMT_12: &str = "%r";
@@ -287,7 +290,7 @@ mod tests {
         let utc_time: DateTime<Utc> = Utc.ymd(2014, 7, 8).and_hms(15, 36, 47);
         let utc_time_offset_str = "-3";
 
-        let actual = create_offset_time_string(utc_time, &utc_time_offset_str, FMT_12).unwrap();
+        let actual = create_offset_time_string(utc_time, utc_time_offset_str, FMT_12).unwrap();
         assert_eq!(actual, "12:36:47 PM");
     }
 
@@ -296,7 +299,7 @@ mod tests {
         let utc_time: DateTime<Utc> = Utc.ymd(2014, 7, 8).and_hms(15, 36, 47);
         let utc_time_offset_str = "+5";
 
-        let actual = create_offset_time_string(utc_time, &utc_time_offset_str, FMT_12).unwrap();
+        let actual = create_offset_time_string(utc_time, utc_time_offset_str, FMT_12).unwrap();
         assert_eq!(actual, "08:36:47 PM");
     }
 
@@ -305,7 +308,7 @@ mod tests {
         let utc_time: DateTime<Utc> = Utc.ymd(2014, 7, 8).and_hms(15, 36, 47);
         let utc_time_offset_str = "+9.5";
 
-        let actual = create_offset_time_string(utc_time, &utc_time_offset_str, FMT_12).unwrap();
+        let actual = create_offset_time_string(utc_time, utc_time_offset_str, FMT_12).unwrap();
         assert_eq!(actual, "01:06:47 AM");
     }
 
@@ -314,7 +317,7 @@ mod tests {
         let utc_time: DateTime<Utc> = Utc.ymd(2014, 7, 8).and_hms(15, 36, 47);
         let utc_time_offset_str = "+5.75";
 
-        let actual = create_offset_time_string(utc_time, &utc_time_offset_str, FMT_12).unwrap();
+        let actual = create_offset_time_string(utc_time, utc_time_offset_str, FMT_12).unwrap();
         assert_eq!(actual, "09:21:47 PM");
     }
 
@@ -323,7 +326,7 @@ mod tests {
         let utc_time: DateTime<Utc> = Utc.ymd(2014, 7, 8).and_hms(15, 36, 47);
         let utc_time_offset_str = "+24";
 
-        create_offset_time_string(utc_time, &utc_time_offset_str, FMT_12)
+        create_offset_time_string(utc_time, utc_time_offset_str, FMT_12)
             .err()
             .expect("Invalid timezone offset.");
     }
@@ -333,7 +336,7 @@ mod tests {
         let utc_time: DateTime<Utc> = Utc.ymd(2014, 7, 8).and_hms(15, 36, 47);
         let utc_time_offset_str = "-24";
 
-        create_offset_time_string(utc_time, &utc_time_offset_str, FMT_12)
+        create_offset_time_string(utc_time, utc_time_offset_str, FMT_12)
             .err()
             .expect("Invalid timezone offset.");
     }
@@ -343,7 +346,7 @@ mod tests {
         let utc_time: DateTime<Utc> = Utc.ymd(2014, 7, 8).and_hms(15, 36, 47);
         let utc_time_offset_str = "+9001";
 
-        create_offset_time_string(utc_time, &utc_time_offset_str, FMT_12)
+        create_offset_time_string(utc_time, utc_time_offset_str, FMT_12)
             .err()
             .expect("Invalid timezone offset.");
     }
@@ -353,7 +356,7 @@ mod tests {
         let utc_time: DateTime<Utc> = Utc.ymd(2014, 7, 8).and_hms(15, 36, 47);
         let utc_time_offset_str = "-4242";
 
-        create_offset_time_string(utc_time, &utc_time_offset_str, FMT_12)
+        create_offset_time_string(utc_time, utc_time_offset_str, FMT_12)
             .err()
             .expect("Invalid timezone offset.");
     }
@@ -363,7 +366,7 @@ mod tests {
         let utc_time: DateTime<Utc> = Utc.ymd(2014, 7, 8).and_hms(15, 36, 47);
         let utc_time_offset_str = "completely wrong config";
 
-        create_offset_time_string(utc_time, &utc_time_offset_str, FMT_12)
+        create_offset_time_string(utc_time, utc_time_offset_str, FMT_12)
             .err()
             .expect("Invalid timezone offset.");
     }
@@ -416,7 +419,7 @@ mod tests {
         let time_end = None;
         let time_now = NaiveTime::from_hms(10, 00, 00);
 
-        assert_eq!(is_inside_time_range(time_now, time_start, time_end), true);
+        assert!(is_inside_time_range(time_now, time_start, time_end));
     }
 
     #[test]
@@ -425,8 +428,8 @@ mod tests {
         let time_now = NaiveTime::from_hms(12, 00, 00);
         let time_now2 = NaiveTime::from_hms(8, 00, 00);
 
-        assert_eq!(is_inside_time_range(time_now, time_start, None), true);
-        assert_eq!(is_inside_time_range(time_now2, time_start, None), false);
+        assert!(is_inside_time_range(time_now, time_start, None));
+        assert!(!is_inside_time_range(time_now2, time_start, None));
     }
 
     #[test]
@@ -435,8 +438,8 @@ mod tests {
         let time_now = NaiveTime::from_hms(15, 00, 00);
         let time_now2 = NaiveTime::from_hms(19, 00, 00);
 
-        assert_eq!(is_inside_time_range(time_now, None, time_end), true);
-        assert_eq!(is_inside_time_range(time_now2, None, time_end), false);
+        assert!(is_inside_time_range(time_now, None, time_end));
+        assert!(!is_inside_time_range(time_now2, None, time_end));
     }
 
     #[test]
@@ -447,9 +450,9 @@ mod tests {
         let time_now2 = NaiveTime::from_hms(13, 00, 00);
         let time_now3 = NaiveTime::from_hms(20, 00, 00);
 
-        assert_eq!(is_inside_time_range(time_now, time_start, time_end), false);
-        assert_eq!(is_inside_time_range(time_now2, time_start, time_end), true);
-        assert_eq!(is_inside_time_range(time_now3, time_start, time_end), false);
+        assert!(!is_inside_time_range(time_now, time_start, time_end));
+        assert!(is_inside_time_range(time_now2, time_start, time_end));
+        assert!(!is_inside_time_range(time_now3, time_start, time_end));
     }
 
     #[test]
@@ -460,8 +463,51 @@ mod tests {
         let time_now2 = NaiveTime::from_hms(13, 00, 00);
         let time_now3 = NaiveTime::from_hms(20, 00, 00);
 
-        assert_eq!(is_inside_time_range(time_now, time_start, time_end), true);
-        assert_eq!(is_inside_time_range(time_now2, time_start, time_end), false);
-        assert_eq!(is_inside_time_range(time_now3, time_start, time_end), true);
+        assert!(is_inside_time_range(time_now, time_start, time_end));
+        assert!(!is_inside_time_range(time_now2, time_start, time_end));
+        assert!(is_inside_time_range(time_now3, time_start, time_end));
+    }
+
+    #[test]
+    fn config_enabled() {
+        let actual = ModuleRenderer::new("time")
+            .config(toml::toml! {
+                [time]
+                disabled = false
+            })
+            .collect();
+
+        // We can't test what it actually is...but we can assert that it is something
+        assert!(actual.is_some());
+    }
+
+    #[test]
+    fn config_blank() {
+        let actual = ModuleRenderer::new("time").collect();
+
+        let expected = None;
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn config_check_prefix_and_suffix() {
+        let actual = ModuleRenderer::new("time")
+            .config(toml::toml! {
+                [time]
+                disabled = false
+                format = "at [\\[$time\\]]($style) "
+                time_format = "%T"
+            })
+            .collect()
+            .unwrap();
+
+        // This is the prefix with "at ", the color code, then the prefix char [
+        let col_prefix = format!("at {}{}[", '\u{1b}', "[1;33m");
+
+        // This is the suffix with suffix char ']', then color codes, then a space
+        let col_suffix = format!("]{}{} ", '\u{1b}', "[0m");
+
+        assert!(actual.starts_with(&col_prefix));
+        assert!(actual.ends_with(&col_suffix));
     }
 }

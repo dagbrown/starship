@@ -2,30 +2,23 @@ use super::{Context, Module, RootModuleConfig};
 
 use crate::configs::dart::DartConfig;
 use crate::formatter::StringFormatter;
-use crate::utils;
+use crate::formatter::VersionFormatter;
 
 /// Creates a module with the current Dart version
-///
-/// Will display the Dart version if any of the following criteria are met:
-///     - Current directory contains a file with `.dart` extension
-///     - Current directory contains a `.dart_tool` directory
-///     - Current directory contains a `pubspec.yaml`/`pubspec.yml` or `pubspec.lock` file
 pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
+    let mut module = context.new_module("dart");
+    let config: DartConfig = DartConfig::try_load(module.config);
+
     let is_dart_project = context
         .try_begin_scan()?
-        .set_extensions(&["dart"])
-        .set_folders(&[".dart_tool"])
-        .set_files(&["pubspec.yaml", "pubspec.yml", "pubspec.lock"])
+        .set_files(&config.detect_files)
+        .set_extensions(&config.detect_extensions)
+        .set_folders(&config.detect_folders)
         .is_match();
 
     if !is_dart_project {
         return None;
     }
-
-    let dart_version = utils::exec_cmd("dart", &["--version"])?.stderr;
-
-    let mut module = context.new_module("dart");
-    let config: DartConfig = DartConfig::try_load(module.config);
 
     let parsed = StringFormatter::new(config.format).and_then(|formatter| {
         formatter
@@ -38,10 +31,19 @@ pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
                 _ => None,
             })
             .map(|variable| match variable {
-                "version" => parse_dart_version(&dart_version).map(Ok),
+                "version" => {
+                    let dart_version =
+                        parse_dart_version(&context.exec_cmd("dart", &["--version"])?.stderr)?;
+                    VersionFormatter::format_module_version(
+                        module.get_name(),
+                        &dart_version,
+                        config.version_format,
+                    )
+                    .map(Ok)
+                }
                 _ => None,
             })
-            .parse(None)
+            .parse(None, Some(context))
     });
 
     module.set_segments(match parsed {
@@ -56,33 +58,27 @@ pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
 }
 
 fn parse_dart_version(dart_version: &str) -> Option<String> {
-    let version = dart_version
-        // split into ["Dart", "VM", "version:", "2.8.4", "(stable)", ...]
-        .split_whitespace()
-        // return "2.8.4"
-        .nth(3)?;
-
-    Some(format!("v{}", version))
+    Some(
+        dart_version
+            // split into ["Dart", "VM", "version:", "2.8.4", "(stable)", ...]
+            .split_whitespace()
+            // return "2.8.4"
+            .nth(3)?
+            .to_string(),
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::parse_dart_version;
-    use crate::modules::utils::test::render_module;
+    use crate::test::ModuleRenderer;
     use ansi_term::Color;
     use std::fs::{self, File};
     use std::io;
 
     #[test]
-    fn test_parse_dart_version() {
-        let input = "Dart VM version: 2.8.4 (stable)";
-        assert_eq!(parse_dart_version(input), Some("v2.8.4".to_string()));
-    }
-
-    #[test]
     fn folder_without_dart_file() -> io::Result<()> {
         let dir = tempfile::tempdir()?;
-        let actual = render_module("dart", dir.path(), None);
+        let actual = ModuleRenderer::new("dart").path(dir.path()).collect();
         let expected = None;
         assert_eq!(expected, actual);
         dir.close()
@@ -93,8 +89,8 @@ mod tests {
         let dir = tempfile::tempdir()?;
         File::create(dir.path().join("any.dart"))?.sync_all()?;
 
-        let actual = render_module("dart", dir.path(), None);
-        let expected = Some(format!("via {} ", Color::Blue.bold().paint("🎯 v2.8.4")));
+        let actual = ModuleRenderer::new("dart").path(dir.path()).collect();
+        let expected = Some(format!("via {}", Color::Blue.bold().paint("🎯 v2.8.4 ")));
         assert_eq!(expected, actual);
         dir.close()
     }
@@ -104,8 +100,8 @@ mod tests {
         let dir = tempfile::tempdir()?;
         fs::create_dir_all(dir.path().join(".dart_tool"))?;
 
-        let actual = render_module("dart", dir.path(), None);
-        let expected = Some(format!("via {} ", Color::Blue.bold().paint("🎯 v2.8.4")));
+        let actual = ModuleRenderer::new("dart").path(dir.path()).collect();
+        let expected = Some(format!("via {}", Color::Blue.bold().paint("🎯 v2.8.4 ")));
         assert_eq!(expected, actual);
         dir.close()
     }
@@ -115,8 +111,8 @@ mod tests {
         let dir = tempfile::tempdir()?;
         File::create(dir.path().join("pubspec.yaml"))?.sync_all()?;
 
-        let actual = render_module("dart", dir.path(), None);
-        let expected = Some(format!("via {} ", Color::Blue.bold().paint("🎯 v2.8.4")));
+        let actual = ModuleRenderer::new("dart").path(dir.path()).collect();
+        let expected = Some(format!("via {}", Color::Blue.bold().paint("🎯 v2.8.4 ")));
         assert_eq!(expected, actual);
         dir.close()
     }
@@ -126,8 +122,8 @@ mod tests {
         let dir = tempfile::tempdir()?;
         File::create(dir.path().join("pubspec.yml"))?.sync_all()?;
 
-        let actual = render_module("dart", dir.path(), None);
-        let expected = Some(format!("via {} ", Color::Blue.bold().paint("🎯 v2.8.4")));
+        let actual = ModuleRenderer::new("dart").path(dir.path()).collect();
+        let expected = Some(format!("via {}", Color::Blue.bold().paint("🎯 v2.8.4 ")));
         assert_eq!(expected, actual);
         dir.close()
     }
@@ -137,8 +133,8 @@ mod tests {
         let dir = tempfile::tempdir()?;
         File::create(dir.path().join("pubspec.lock"))?.sync_all()?;
 
-        let actual = render_module("dart", dir.path(), None);
-        let expected = Some(format!("via {} ", Color::Blue.bold().paint("🎯 v2.8.4")));
+        let actual = ModuleRenderer::new("dart").path(dir.path()).collect();
+        let expected = Some(format!("via {}", Color::Blue.bold().paint("🎯 v2.8.4 ")));
         assert_eq!(expected, actual);
         dir.close()
     }

@@ -17,15 +17,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Setup | Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v2.4.0
 
       - name: Setup | Rust
-        uses: actions-rs/toolchain@v1
+        uses: actions-rs/toolchain@v1.0.7
         with:
           toolchain: stable
           override: true
           profile: minimal
           components: rustfmt
+
+      - name: Setup | libdbus (ubuntu)
+        run: sudo apt-get install libdbus-1-dev
 
       - name: Build | Format
         run: cargo fmt --all -- --check
@@ -39,20 +42,17 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - name: Setup | Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v2.4.0
 
-      # Cache files between builds
-      - name: Setup | Cache Cargo
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Setup | Cache
+        uses: Swatinem/rust-cache@v1
+
+      - name: Setup | libdbus (ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get install libdbus-1-dev
 
       - name: Setup | Rust
-        uses: actions-rs/toolchain@v1
+        uses: actions-rs/toolchain@v1.0.7
         with:
           toolchain: stable
           override: true
@@ -60,10 +60,10 @@ jobs:
           components: clippy
 
       - name: Build | Lint
-        uses: actions-rs/cargo@v1
+        uses: actions-rs/cargo@v1.0.3
         with:
           command: clippy
-          args: --all-targets --all-features -- -D clippy::all
+          args: --workspace --locked --all-targets --all-features -- -D clippy::all
 
   # Ensure that the project could be successfully compiled
   cargo_check:
@@ -71,27 +71,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Setup | Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v2.4.0
 
-      # Cache files between builds
-      - name: Setup | Cache Cargo
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Setup | Cache
+        uses: Swatinem/rust-cache@v1
 
       - name: Setup | Rust
-        uses: actions-rs/toolchain@v1
+        uses: actions-rs/toolchain@v1.0.7
         with:
           toolchain: stable
           profile: minimal
           override: true
 
       - name: Build | Check
-        run: cargo check --all
+        run: cargo check --workspace --locked
 
   # Run tests on Linux, macOS, and Windows
   # On both Rust stable and Rust nightly
@@ -106,36 +99,28 @@ jobs:
         rust: [stable, nightly]
     steps:
       - name: Setup | Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v2.4.0
 
-      - name: Setup | Cache Cargo
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-${{ matrix.rust }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Setup | libdbus (ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get install libdbus-1-dev
+
+      - name: Setup | Cache
+        uses: Swatinem/rust-cache@v1
 
       # Install all the required dependencies for testing
       - name: Setup | Rust
-        uses: actions-rs/toolchain@v1
+        uses: actions-rs/toolchain@v1.0.7
         with:
           toolchain: ${{ matrix.rust }}
           profile: minimal
           override: true
 
-      # Install dotnet at a fixed version
-      - name: Setup | DotNet
-        uses: actions/setup-dotnet@v1
-        with:
-          dotnet-version: "2.2.402"
-
       # Install Mercurial (pre-installed on Linux and windows)
       - name: Setup | Mercurial (macos)
         if: matrix.os == 'macOS-latest'
-        run: pip3 install mercurial
+        run: brew install mercurial
 
       # Run the ignored tests that expect the above setup
       - name: Build | Test
-        run: cargo test -- -Z unstable-options --include-ignored
+        run: cargo test --workspace --locked --all-features -- -Z unstable-options --include-ignored

@@ -1,5 +1,3 @@
-use std::env;
-
 use super::{Context, Module};
 use std::ffi::OsString;
 
@@ -16,7 +14,7 @@ pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
     let mut module = context.new_module("hostname");
     let config: HostnameConfig = HostnameConfig::try_load(module.config);
 
-    let ssh_connection = env::var("SSH_CONNECTION").ok();
+    let ssh_connection = context.get_env("SSH_CONNECTION");
     if config.ssh_only && ssh_connection.is_none() {
         return None;
     }
@@ -26,14 +24,14 @@ pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
     let host = match os_hostname.into_string() {
         Ok(host) => host,
         Err(bad) => {
-            log::debug!("hostname is not valid UTF!\n{:?}", bad);
+            log::warn!("hostname is not valid UTF!\n{:?}", bad);
             return None;
         }
     };
 
     //rustc doesn't let you do an "if" and an "if let" in the same if statement
     // if this changes in the future this can become a lot cleaner
-    let host = if config.trim_at != "" {
+    let host = if !config.trim_at.is_empty() {
         if let Some(index) = host.find(config.trim_at) {
             host.split_at(index).0
         } else {
@@ -53,7 +51,7 @@ pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
                 "hostname" => Some(Ok(host)),
                 _ => None,
             })
-            .parse(None)
+            .parse(None, Some(context))
     });
 
     module.set_segments(match parsed {
@@ -65,4 +63,103 @@ pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
     });
 
     Some(module)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test::ModuleRenderer;
+    use ansi_term::{Color, Style};
+
+    macro_rules! get_hostname {
+        () => {
+            if let Some(hostname) = gethostname::gethostname().into_string().ok() {
+                hostname
+            } else {
+                println!(
+                    "hostname was not tested because gethostname failed! \
+                     This could be caused by your hostname containing invalid UTF."
+                );
+                return;
+            }
+        };
+    }
+
+    #[test]
+    fn ssh_only_false() {
+        let hostname = get_hostname!();
+        let actual = ModuleRenderer::new("hostname")
+            .config(toml::toml! {
+                [hostname]
+                ssh_only = false
+                trim_at = ""
+            })
+            .collect();
+        let expected = Some(format!("{} in ", style().paint(hostname)));
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn no_ssh() {
+        let actual = ModuleRenderer::new("hostname")
+            .config(toml::toml! {
+                [hostname]
+                ssh_only = true
+            })
+            .collect();
+        let expected = None;
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn ssh() {
+        let hostname = get_hostname!();
+        let actual = ModuleRenderer::new("hostname")
+            .config(toml::toml! {
+                [hostname]
+                ssh_only = true
+                trim_at = ""
+            })
+            .env("SSH_CONNECTION", "something")
+            .collect();
+        let expected = Some(format!("{} in ", style().paint(hostname)));
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn no_trim_at() {
+        let hostname = get_hostname!();
+        let actual = ModuleRenderer::new("hostname")
+            .config(toml::toml! {
+                [hostname]
+                ssh_only = false
+                trim_at = ""
+            })
+            .collect();
+        let expected = Some(format!("{} in ", style().paint(hostname)));
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn trim_at() {
+        let hostname = get_hostname!();
+        let (remainder, trim_at) = hostname.split_at(1);
+        let actual = ModuleRenderer::new("hostname")
+            .config(toml::toml! {
+                [hostname]
+                ssh_only = false
+                trim_at = trim_at
+            })
+            .collect();
+        let expected = Some(format!("{} in ", style().paint(remainder)));
+
+        assert_eq!(expected, actual);
+    }
+
+    fn style() -> Style {
+        Color::Green.bold().dimmed()
+    }
 }

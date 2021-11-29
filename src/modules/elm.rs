@@ -2,33 +2,23 @@ use super::{Context, Module, RootModuleConfig};
 
 use crate::configs::elm::ElmConfig;
 use crate::formatter::StringFormatter;
-use crate::utils;
+use crate::formatter::VersionFormatter;
 
 /// Creates a module with the current Elm version
-///
-/// Will display the Elm version if any of the following criteria are met:
-///     - The current directory contains a `elm.json` file
-///     - The current directory contains a `elm-package.json` file
-///     - The current directory contains a `.elm-version` file
-///     - The current directory contains a `elm-stuff` folder
-///     - The current directory contains a `*.elm` files
 pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
+    let mut module = context.new_module("elm");
+    let config: ElmConfig = ElmConfig::try_load(module.config);
+
     let is_elm_project = context
         .try_begin_scan()?
-        .set_files(&["elm.json", "elm-package.json", ".elm-version"])
-        .set_extensions(&["elm"])
-        .set_folders(&["elm-stuff"])
+        .set_files(&config.detect_files)
+        .set_extensions(&config.detect_extensions)
+        .set_folders(&config.detect_folders)
         .is_match();
 
     if !is_elm_project {
         return None;
     }
-
-    let elm_version = utils::exec_cmd("elm", &["--version"])?.stdout;
-    let module_version = Some(format!("v{}", elm_version.trim()))?;
-
-    let mut module = context.new_module("elm");
-    let config: ElmConfig = ElmConfig::try_load(module.config);
 
     let parsed = StringFormatter::new(config.format).and_then(|formatter| {
         formatter
@@ -41,10 +31,18 @@ pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
                 _ => None,
             })
             .map(|variable| match variable {
-                "version" => Some(Ok(&module_version)),
+                "version" => {
+                    let elm_version = context.exec_cmd("elm", &["--version"])?.stdout;
+                    VersionFormatter::format_module_version(
+                        module.get_name(),
+                        elm_version.trim(),
+                        config.version_format,
+                    )
+                    .map(Ok)
+                }
                 _ => None,
             })
-            .parse(None)
+            .parse(None, Some(context))
     });
 
     module.set_segments(match parsed {
@@ -60,7 +58,7 @@ pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::modules::utils::test::render_module;
+    use crate::test::ModuleRenderer;
     use ansi_term::Color;
     use std::fs::{self, File};
     use std::io;
@@ -68,7 +66,7 @@ mod tests {
     #[test]
     fn folder_without_elm() -> io::Result<()> {
         let dir = tempfile::tempdir()?;
-        let actual = render_module("elm", dir.path(), None);
+        let actual = ModuleRenderer::new("elm").path(dir.path()).collect();
         let expected = None;
         assert_eq!(expected, actual);
         dir.close()
@@ -78,8 +76,8 @@ mod tests {
     fn folder_with_elm_json() -> io::Result<()> {
         let dir = tempfile::tempdir()?;
         File::create(dir.path().join("elm.json"))?.sync_all()?;
-        let actual = render_module("elm", dir.path(), None);
-        let expected = Some(format!("via {} ", Color::Cyan.bold().paint("🌳 v0.19.1")));
+        let actual = ModuleRenderer::new("elm").path(dir.path()).collect();
+        let expected = Some(format!("via {}", Color::Cyan.bold().paint("🌳 v0.19.1 ")));
         assert_eq!(expected, actual);
         dir.close()
     }
@@ -88,8 +86,8 @@ mod tests {
     fn folder_with_elm_package_json() -> io::Result<()> {
         let dir = tempfile::tempdir()?;
         File::create(dir.path().join("elm-package.json"))?.sync_all()?;
-        let actual = render_module("elm", dir.path(), None);
-        let expected = Some(format!("via {} ", Color::Cyan.bold().paint("🌳 v0.19.1")));
+        let actual = ModuleRenderer::new("elm").path(dir.path()).collect();
+        let expected = Some(format!("via {}", Color::Cyan.bold().paint("🌳 v0.19.1 ")));
         assert_eq!(expected, actual);
         dir.close()
     }
@@ -98,8 +96,8 @@ mod tests {
     fn folder_with_elm_version() -> io::Result<()> {
         let dir = tempfile::tempdir()?;
         File::create(dir.path().join(".elm-version"))?.sync_all()?;
-        let actual = render_module("elm", dir.path(), None);
-        let expected = Some(format!("via {} ", Color::Cyan.bold().paint("🌳 v0.19.1")));
+        let actual = ModuleRenderer::new("elm").path(dir.path()).collect();
+        let expected = Some(format!("via {}", Color::Cyan.bold().paint("🌳 v0.19.1 ")));
         assert_eq!(expected, actual);
         dir.close()
     }
@@ -109,8 +107,8 @@ mod tests {
         let dir = tempfile::tempdir()?;
         let elmstuff = dir.path().join("elm-stuff");
         fs::create_dir_all(&elmstuff)?;
-        let actual = render_module("elm", dir.path(), None);
-        let expected = Some(format!("via {} ", Color::Cyan.bold().paint("🌳 v0.19.1")));
+        let actual = ModuleRenderer::new("elm").path(dir.path()).collect();
+        let expected = Some(format!("via {}", Color::Cyan.bold().paint("🌳 v0.19.1 ")));
         assert_eq!(expected, actual);
         dir.close()
     }
@@ -119,8 +117,8 @@ mod tests {
     fn folder_with_elm_file() -> io::Result<()> {
         let dir = tempfile::tempdir()?;
         File::create(dir.path().join("main.elm"))?.sync_all()?;
-        let actual = render_module("elm", dir.path(), None);
-        let expected = Some(format!("via {} ", Color::Cyan.bold().paint("🌳 v0.19.1")));
+        let actual = ModuleRenderer::new("elm").path(dir.path()).collect();
+        let expected = Some(format!("via {}", Color::Cyan.bold().paint("🌳 v0.19.1 ")));
         assert_eq!(expected, actual);
         dir.close()
     }

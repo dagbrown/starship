@@ -2,28 +2,22 @@ use super::{Context, Module, RootModuleConfig};
 
 use crate::configs::purescript::PureScriptConfig;
 use crate::formatter::StringFormatter;
-use crate::utils;
+use crate::formatter::VersionFormatter;
 
 /// Creates a module with the current PureScript version
-///
-/// Will display the PureScript version if any of the following criteria are met:
-///     - Current directory contains a `spago.dhall` file
-///     - Current directory contains a `*.purs` files
 pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
+    let mut module = context.new_module("purescript");
+    let config: PureScriptConfig = PureScriptConfig::try_load(module.config);
     let is_purs_project = context
         .try_begin_scan()?
-        .set_files(&["spago.dhall"])
-        .set_extensions(&["purs"])
+        .set_files(&config.detect_files)
+        .set_folders(&config.detect_folders)
+        .set_extensions(&config.detect_extensions)
         .is_match();
 
     if !is_purs_project {
         return None;
     }
-
-    let purs_version = utils::exec_cmd("purs", &["--version"])?.stdout;
-
-    let mut module = context.new_module("purescript");
-    let config: PureScriptConfig = PureScriptConfig::try_load(module.config);
 
     let parsed = StringFormatter::new(config.format).and_then(|formatter| {
         formatter
@@ -36,10 +30,18 @@ pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
                 _ => None,
             })
             .map(|variable| match variable {
-                "version" => Some(Ok(format!("v{}", purs_version.trim()))),
+                "version" => {
+                    let purs_version = context.exec_cmd("purs", &["--version"])?.stdout;
+                    VersionFormatter::format_module_version(
+                        module.get_name(),
+                        purs_version.trim(),
+                        config.version_format,
+                    )
+                    .map(Ok)
+                }
                 _ => None,
             })
-            .parse(None)
+            .parse(None, Some(context))
     });
 
     module.set_segments(match parsed {
@@ -55,7 +57,7 @@ pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::modules::utils::test::render_module;
+    use crate::test::ModuleRenderer;
     use ansi_term::Color;
     use std::fs::File;
     use std::io;
@@ -63,7 +65,7 @@ mod tests {
     #[test]
     fn folder_without_purescript_files() -> io::Result<()> {
         let dir = tempfile::tempdir()?;
-        let actual = render_module("purescript", dir.path(), None);
+        let actual = ModuleRenderer::new("purescript").path(dir.path()).collect();
         let expected = None;
         assert_eq!(expected, actual);
         dir.close()
@@ -74,8 +76,8 @@ mod tests {
         let dir = tempfile::tempdir()?;
         File::create(dir.path().join("Main.purs"))?.sync_all()?;
 
-        let actual = render_module("purescript", dir.path(), None);
-        let expected = Some(format!("via {} ", Color::White.bold().paint("<=> v0.13.5")));
+        let actual = ModuleRenderer::new("purescript").path(dir.path()).collect();
+        let expected = Some(format!("via {}", Color::White.bold().paint("<=> v0.13.5 ")));
         assert_eq!(expected, actual);
         dir.close()
     }
@@ -85,8 +87,8 @@ mod tests {
         let dir = tempfile::tempdir()?;
         File::create(dir.path().join("spago.dhall"))?.sync_all()?;
 
-        let actual = render_module("purescript", dir.path(), None);
-        let expected = Some(format!("via {} ", Color::White.bold().paint("<=> v0.13.5")));
+        let actual = ModuleRenderer::new("purescript").path(dir.path()).collect();
+        let expected = Some(format!("via {}", Color::White.bold().paint("<=> v0.13.5 ")));
         assert_eq!(expected, actual);
         dir.close()
     }

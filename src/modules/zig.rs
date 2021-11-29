@@ -2,30 +2,23 @@ use super::{Context, Module, RootModuleConfig};
 
 use crate::configs::zig::ZigConfig;
 use crate::formatter::StringFormatter;
-use crate::utils;
+use crate::formatter::VersionFormatter;
 
 /// Creates a module with the current Zig version
-///
-/// Will display the Zig version if any of the following criteria are met:
-///     - The current directory contains a file with extension `.zig`
 pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
+    let mut module = context.new_module("zig");
+    let config = ZigConfig::try_load(module.config);
+
     let is_zig_project = context
         .try_begin_scan()?
-        .set_extensions(&["zig"])
+        .set_files(&config.detect_files)
+        .set_extensions(&config.detect_extensions)
+        .set_folders(&config.detect_folders)
         .is_match();
 
     if !is_zig_project {
         return None;
     }
-
-    let zig_version_output = utils::exec_cmd("zig", &["version"])?
-        .stdout
-        .trim()
-        .to_string();
-    let zig_version = format!("v{}", zig_version_output);
-
-    let mut module = context.new_module("zig");
-    let config = ZigConfig::try_load(module.config);
 
     let parsed = StringFormatter::new(config.format).and_then(|formatter| {
         formatter
@@ -38,10 +31,18 @@ pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
                 _ => None,
             })
             .map(|variable| match variable {
-                "version" => Some(Ok(zig_version.clone())),
+                "version" => {
+                    let zig_version = context.exec_cmd("zig", &["version"])?.stdout;
+                    VersionFormatter::format_module_version(
+                        module.get_name(),
+                        zig_version.trim(),
+                        config.version_format,
+                    )
+                    .map(Ok)
+                }
                 _ => None,
             })
-            .parse(None)
+            .parse(None, Some(context))
     });
 
     module.set_segments(match parsed {
@@ -57,7 +58,7 @@ pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
 
 #[cfg(test)]
 mod tests {
-    use crate::modules::utils::test::render_module;
+    use crate::test::ModuleRenderer;
     use ansi_term::Color;
     use std::fs::File;
     use std::io;
@@ -66,7 +67,7 @@ mod tests {
     fn folder_without_zig() -> io::Result<()> {
         let dir = tempfile::tempdir()?;
         File::create(dir.path().join("zig.txt"))?.sync_all()?;
-        let actual = render_module("zig", dir.path(), None);
+        let actual = ModuleRenderer::new("zig").path(dir.path()).collect();
         let expected = None;
         assert_eq!(expected, actual);
         dir.close()
@@ -76,8 +77,8 @@ mod tests {
     fn folder_with_zig_file() -> io::Result<()> {
         let dir = tempfile::tempdir()?;
         File::create(dir.path().join("main.zig"))?.sync_all()?;
-        let actual = render_module("zig", dir.path(), None);
-        let expected = Some(format!("via {} ", Color::Yellow.bold().paint("↯ v0.6.0")));
+        let actual = ModuleRenderer::new("zig").path(dir.path()).collect();
+        let expected = Some(format!("via {}", Color::Yellow.bold().paint("↯ v0.6.0 ")));
         assert_eq!(expected, actual);
         dir.close()
     }
