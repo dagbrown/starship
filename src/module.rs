@@ -1,4 +1,5 @@
 use crate::context::Shell;
+use crate::segment;
 use crate::segment::{FillSegment, Segment};
 use crate::utils::wrap_colorseq_for_shell;
 use ansi_term::{ANSIString, ANSIStrings};
@@ -9,14 +10,19 @@ use std::time::Duration;
 // Default ordering is handled in configs/starship_root.rs
 pub const ALL_MODULES: &[&str] = &[
     "aws",
+    "azure",
     #[cfg(feature = "battery")]
     "battery",
+    "buf",
+    "c",
     "character",
     "cmake",
     "cmd_duration",
     "cobol",
     "conda",
+    "container",
     "crystal",
+    "daml",
     "dart",
     "deno",
     "directory",
@@ -34,6 +40,7 @@ pub const ALL_MODULES: &[&str] = &[
     "git_state",
     "git_status",
     "golang",
+    "haskell",
     "helm",
     "hg_branch",
     "hostname",
@@ -43,6 +50,7 @@ pub const ALL_MODULES: &[&str] = &[
     "kotlin",
     "kubernetes",
     "line_break",
+    "localip",
     "lua",
     "memory_usage",
     "nim",
@@ -65,6 +73,7 @@ pub const ALL_MODULES: &[&str] = &[
     "shell",
     "shlvl",
     "singularity",
+    "spack",
     "status",
     "sudo",
     "swift",
@@ -134,13 +143,10 @@ impl<'a> Module<'a> {
 
     /// Get values of the module's segments
     pub fn get_segments(&self) -> Vec<&str> {
-        self.segments
-            .iter()
-            .map(|segment| segment.value())
-            .collect()
+        self.segments.iter().map(segment::Segment::value).collect()
     }
 
-    /// Returns a vector of colored ANSIString elements to be later used with
+    /// Returns a vector of colored `ANSIString` elements to be later used with
     /// `ANSIStrings()` to optimize ANSI codes
     pub fn ansi_strings(&self) -> Vec<ANSIString> {
         self.ansi_strings_for_shell(Shell::Unknown, None)
@@ -208,8 +214,7 @@ where
         current
     } else {
         let fill_size = term_width
-            .map(|tw| if tw > used { Some(tw - used) } else { None })
-            .flatten()
+            .and_then(|tw| if tw > used { Some(tw - used) } else { None })
             .map(|remaining| remaining / chunks.len());
         chunks
             .into_iter()
@@ -228,7 +233,7 @@ mod tests {
 
     #[test]
     fn test_all_modules_is_in_alphabetical_order() {
-        let mut sorted_modules: Vec<&str> = ALL_MODULES.iter().copied().collect();
+        let mut sorted_modules: Vec<&str> = ALL_MODULES.to_vec();
         sorted_modules.sort_unstable();
         assert_eq!(sorted_modules.as_slice(), ALL_MODULES);
     }

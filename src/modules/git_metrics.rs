@@ -2,7 +2,7 @@ use regex::Regex;
 use std::ffi::OsStr;
 
 use crate::{
-    config::RootModuleConfig, configs::git_metrics::GitMetricsConfig,
+    config::ModuleConfig, configs::git_metrics::GitMetricsConfig,
     formatter::string_formatter::StringFormatterError, formatter::StringFormatter, module::Module,
 };
 
@@ -21,13 +21,15 @@ pub fn module<'a>(context: &'a Context) -> Option<Module<'a>> {
     };
 
     let repo = context.get_repo().ok()?;
-    let repo_root = repo.root.as_ref()?;
+    let repo_root = repo.workdir.as_ref()?;
 
     let diff = context
         .exec_cmd(
             "git",
             &[
-                OsStr::new("-C"),
+                OsStr::new("--git-dir"),
+                repo.path.as_os_str(),
+                OsStr::new("--work-tree"),
                 repo_root.as_os_str(),
                 OsStr::new("--no-optional-locks"),
                 OsStr::new("diff"),

@@ -1,9 +1,8 @@
-use crate::config::ModuleConfig;
+use serde::{Deserialize, Serialize};
 
-use serde::Serialize;
-use starship_module_config_derive::ModuleConfig;
-
-#[derive(Clone, ModuleConfig, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "config-schema", derive(schemars::JsonSchema))]
+#[serde(default)]
 pub struct PulumiConfig<'a> {
     pub format: &'a str,
     pub version_format: &'a str,
@@ -15,7 +14,7 @@ pub struct PulumiConfig<'a> {
 impl<'a> Default for PulumiConfig<'a> {
     fn default() -> Self {
         PulumiConfig {
-            format: "via [$symbol$stack]($style) ",
+            format: "via [$symbol($username@)$stack]($style) ",
             version_format: "v${raw}",
             symbol: " ",
             style: "bold 5",

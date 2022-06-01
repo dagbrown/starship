@@ -1,4 +1,4 @@
-use super::{Context, Module, RootModuleConfig};
+use super::{Context, Module, ModuleConfig};
 
 use crate::configs::go::GoConfig;
 use crate::formatter::StringFormatter;
@@ -62,10 +62,10 @@ fn parse_go_version(go_stdout: &str) -> Option<String> {
     // go version go1.13.3 linux/amd64
 
     let version = go_stdout
-        // split into ["", "1.12.4 linux/amd64"]
-        .splitn(2, "go version go")
+        // split into ("", "1.12.4 linux/amd64")
+        .split_once("go version go")?
         // return "1.12.4 linux/amd64"
-        .nth(1)?
+        .1
         // split into ["1.12.4", "linux/amd64"]
         .split_whitespace()
         // return "1.12.4"
@@ -121,6 +121,18 @@ mod tests {
     fn folder_with_go_sum() -> io::Result<()> {
         let dir = tempfile::tempdir()?;
         File::create(dir.path().join("go.sum"))?.sync_all()?;
+
+        let actual = ModuleRenderer::new("golang").path(dir.path()).collect();
+
+        let expected = Some(format!("via {}", Color::Cyan.bold().paint("🐹 v1.12.1 ")));
+        assert_eq!(expected, actual);
+        dir.close()
+    }
+
+    #[test]
+    fn folder_with_go_work() -> io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        File::create(dir.path().join("go.work"))?.sync_all()?;
 
         let actual = ModuleRenderer::new("golang").path(dir.path()).collect();
 
